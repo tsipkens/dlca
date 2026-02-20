@@ -1,0 +1,368 @@
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.spatial import cKDTree
+from IPython.display import display, clear_output  # for live plot in Python
+import time
+
+
+
+
+
+
+
+# ----- Discrete Set Union (DSU) Helper Class -----
+# Used to make cluster operations more efficient. 
+class DSU:
+    def __init__(self, n):
+        """
+        Initializes Disjoint Set Union with 'n' individual elements.
+        """
+        self.parent = np.arange(n)
+        self.rank = np.zeros(n, dtype=int)
+        self.agg_count = n  # track number of aggs on merge
+
+    def find(self, i):
+        """
+        Iterative find with path compression to prevent RecursionError.
+        Recursively traces up trees to the root particle.
+        """
+        root = i
+        while self.parent[root] != root:
+            root = self.parent[root]
+        
+        # Path compression: Short-circuit the path to the root
+        while self.parent[i] != root:
+            next_node = self.parent[i]
+            self.parent[i] = root
+            i = next_node
+        return root
+
+    def union(self, i, j):
+        """Union by rank: Attaches the smaller tree to the larger tree during merges."""
+        root_i = self.find(i)
+        root_j = self.find(j)
+        
+        if root_i != root_j:
+            # Union by Rank logic
+            if self.rank[root_i] > self.rank[root_j]:
+                self.parent[root_j] = root_i
+            elif self.rank[root_i] < self.rank[root_j]:
+                self.parent[root_i] = root_j
+            else:
+                self.parent[root_j] = root_i
+                self.rank[root_i] += 1
+            
+            # Decrement aggregate count whenever a merge actually happens
+            self.agg_count -= 1
+            return True
+        return False
+
+    def flatten(self):
+        """
+        Ensures all nodes point directly to their root. 
+        Useful for syncing a 'aggs' array in one pass.
+        """
+        for i in range(len(self.parent)):
+            self.find(i)
+        return self.parent
+
+
+
+def pos2xyz(pos):
+    return pos[:,0], pos[:,1], pos[:,2]
+
+def timecode(length=7):
+    """Converts a number to a base-36 string."""
+    n = int(time.time())  # get current time
+    digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    
+    arr = []
+    while n:
+        n, rem = divmod(n, 36)
+        arr.append(digits[rem])
+    
+    arr.reverse()  # reverse order of characters
+    res = "".join(arr)
+    
+    # Pad with '0' to the left to ensure Windows sorts by string length correctly
+    return res.zfill(length)
+
+def write_xyz(pos, r, c=None, filename=f"outputs\\aggregate.xyz", comment="DLA Cluster", write_mode='w'):
+    """
+    Writes particle positions and radii to an XYZ file.
+
+    
+    Args:
+        particles (list): List of objects with .pos (array-like) and .r (float)
+        filename (str): The output file name.
+        comment (str): Text for the second line of the file.
+    """
+    try:
+        with open(filename, write_mode) as f:
+            # 1. Write the number of atoms/particles
+            f.write(f"{len(pos)}\n")
+            
+            # 2. Write the comment line
+            f.write(f"{comment}\n")
+            
+            # 3. Write each particle: Element (C for Carbon/Default) X Y Z R
+            for ii, p in enumerate(pos):
+                # We use 'C' as a placeholder for the element name
+                # Standard XYZ is: Atom X Y Z. We add R as an extra column.
+                if c is not None:
+                    f.write(f"{p[0]:12.6e} {p[1]:12.6e} {p[2]:12.6e} {r:12.6e} {c[ii]}\n")
+                else:
+                    f.write(f"{p[0]:12.6e} {p[1]:12.6e} {p[2]:12.6e} {r:12.6e}\n")
+        
+    except Exception as e:
+        print(f"Error writing XYZ file: {e}")
+
+
+def init_particles(n, box, r):
+    """
+    Places each particle individually and checks for overlap.
+    """
+    positions = []
+    while len(positions) < n:
+        cand = np.random.uniform(0, box, 3)
+        if len(positions) == 0:
+            positions.append(cand)
+        else:
+            # Check PBC distances
+            diff = np.array(positions) - cand
+            diff -= box * np.round(diff / box) # minimum image convention
+            dists = np.linalg.norm(diff, axis=1)
+            if np.all(dists >= 2 * r):
+                positions.append(cand)
+    return np.array(positions)
+
+
+
+
+def init_live_plot(pos, c=None, ax=None):
+    """
+    For plotting a live 3D scatter plot of particle positions. 
+    """
+    if ax is None:
+        ax = plt.gca()
+
+    if c is None:
+        c = np.ones(len(pos))
+
+    limit = np.max(pos)
+    limit_min = np.min(pos)
+    data_range = limit - limit_min
+
+    # It is crucial to set the limits before calculating the scale
+    ax.set_xlim(limit_min, limit)
+    ax.set_ylim(limit_min, limit)
+    ax.set_zlim(limit_min, limit)
+
+    x = pos[:,0]
+    y = pos[:,1]
+    z = pos[:,2]
+
+    scat = ax.scatter(x, y, z, s=60, c=c)
+
+    return scat
+
+def update_live_plot(fig, scat, pos, clusters):
+    """Update the live plot."""
+    scat._offsets3d = (pos[:,0], pos[:,1], pos[:,2])
+    scat.set_array(clusters)
+    clear_output(wait=True)
+    display(fig)
+    plt.pause(0.001)
+
+
+def get_ascii_2d(pos, box_size=None, res=(10, 25), left=0):
+    """
+    Returns a 2D ASCII string projection (XY plane).
+    res: (rows, cols)
+    """
+
+    # Shrink box to domain of particles for viz.
+    if box_size == None:
+        pos = pos - np.min(pos, axis=0)  # wrap box up to min
+        box_size = np.max(pos)  # get max remaining
+        pos = pos + (box_size - np.max(pos, axis=0)) / 2  # center in remaining box
+
+    rows, cols = res
+    grid = np.full((rows, cols), " ")
+    
+    # Scale XY positions to grid dimensions
+    # pos[:, 0] is X, pos[:, 1] is Y
+    x_indices = (pos[:, 0] / box_size * (cols - 1)).astype(int)
+    y_indices = (res[0] - 1) - (pos[:, 1] / box_size * (rows - 1)).astype(int)
+    
+    # Fill grid (clipping to ensure indices stay in bounds)
+    for x, y in zip(x_indices, y_indices):
+        if 0 <= x < cols and 0 <= y < rows:
+            if grid[y, x] == " ":
+                grid[y, x] = "o"
+            elif grid[y, x] == "o":
+                grid[y, x] = "#"
+            else:
+                grid[y, x] = "@"
+            
+    # Join into a multiline string
+    out = " "*left + "╭" + "-"*int(res[1]) + "╮\n"
+    out = out + "\033[0m|\n".join([" "*left + "|\033[92m" + "".join(row) for row in grid])
+    out = out + "\033[0m|\n" + " "*left + "╰" + "-"*int(res[1]) + "╯"
+    return out
+
+
+def unwrap(pos, box_size, origin=None):
+    """
+    Unwraps a cluster of coordinates relative to the first particle.
+    pos: (N, 3) array
+    box_length: (1,) box dimension
+    origin: (1,) triples and forms the center of the aggregate
+    """
+
+    if origin is None:
+        origin = box_size/2
+
+    # 1. Pick a reference point (the first particle is standard)
+    reference = pos[0]
+    
+    # 2. Calculate the raw displacement from the reference
+    diff = pos - reference
+    
+    # 3. Apply the Minimum Image Convention (MIC)
+    # This finds the shortest distance across the periodic boundary
+    # If diff > L/2, it subtracts L. If diff < -L/2, it adds L.
+    periodic_diff = diff - box_size * np.round(diff / box_size)
+    
+    # 4. Reconstruct the unwrapped coordinates
+    unwrapped_pos = reference + periodic_diff
+
+    # 5. Center the particle about to origin. 
+    unwrapped_pos = unwrapped_pos - np.mean(unwrapped_pos, axis=0) + origin
+    
+    return unwrapped_pos
+
+
+def backoff(pos, radius, box_size, pairs, aggs):
+    """
+    Back particle off of one another to avoid overlap.
+    """
+    backoff = np.zeros((aggs.max() + 1, 3))
+    for ii, jj in pairs:
+        agg_i = aggs[ii]
+
+        # Compute distance vector.
+        diff = pos[ii] - pos[jj]  # distance between particle centers
+        diff = diff - box_size * np.round(diff / box_size)  # apply periodic boundary conditions
+        dist = np.linalg.norm(diff)
+        unit_vec = diff / dist  # unit vector spanning particle centers
+        
+        # Magnitude of correction and multiply by unit vector.
+        correct = 2 * radius - dist + 1e-10  # extra 1e-10 add small amount of space
+        backoff[agg_i] = correct * unit_vec  # backup along normal vector
+
+    return (pos + backoff[aggs]) % box_size  # update positions and apply periodic boundary conditions
+
+
+# def unwrap(pos, box_size, origin=None):
+#     """
+#     Unwraps a cluster of coordinates relative to the first particle.
+#     pos: (N, 3) array
+#     box_length: (1,) box dimension
+#     origin: (1,) triples and forms the center of the aggregate
+#     """
+
+#     if origin is None:
+#         origin = box_size/2
+
+#     # 1. Pick a reference point (the first particle is standard)
+#     reference = pos[0]
+    
+#     # 2. Calculate the raw displacement from the reference
+#     diff = pos - reference
+    
+#     # 3. Apply the Minimum Image Convention (MIC)
+#     # This finds the shortest distance across the periodic boundary
+#     # If diff > L/2, it subtracts L. If diff < -L/2, it adds L.
+#     periodic_diff = diff - box_size * np.round(diff / box_size)
+    
+#     # 4. Reconstruct the unwrapped coordinates
+#     unwrapped_pos = reference + periodic_diff
+
+#     # 5. Center the particle about to origin. 
+#     unwrapped_pos = unwrapped_pos - np.mean(unwrapped_pos, axis=0) + origin
+    
+#     return unwrapped_pos
+
+# def unwrap(pos, box_size, radius=1):
+#     """
+#     Unwraps a cluster by traversing the neighbor tree to ensure 
+#     no local bond exceeds L/2.
+#     """
+#     n = len(pos)
+#     unwrapped = np.zeros_like(pos)
+#     unwrapped[0] = pos[0] # Seed
+#     visited = np.zeros(n, dtype=bool)
+#     visited[0] = True
+    
+#     # Build tree with PBC awareness
+#     tree = cKDTree(pos, boxsize=box_size)
+    
+#     # Queue for Breadth-First Search (BFS)
+#     queue = [0]
+    
+#     while queue:
+#         curr_idx = queue.pop(0)
+#         # Find neighbors within a reasonable bonding distance
+#         # 2.5 * RADIUS ensures we find connected spheres
+#         neighbors = tree.query_ball_point(pos[curr_idx], r=2.5*radius)
+        
+#         for nb_idx in neighbors:
+#             if not visited[nb_idx]:
+#                 # Calculate displacement from the ALREADY UNWRAPPED neighbor
+#                 diff = pos[nb_idx] - pos[curr_idx]
+                
+#                 # Minimum Image Convention for this specific bond
+#                 periodic_diff = diff - box_size * np.round(diff / box_size)
+                
+#                 # Place neighbor relative to the current unwrapped particle
+#                 unwrapped[nb_idx] = unwrapped[curr_idx] + periodic_diff
+                
+#                 visited[nb_idx] = True
+#                 queue.append(nb_idx)
+                
+#     return unwrapped
+
+
+
+def com(pos, box_size):
+    """
+    Computes COM for equivalent particles under periodic boundary conditions.
+    pos: (N, 3) array of XYZ coordinates
+    box_length: (3,) array or float representing box dimensions
+    """
+    # 1. Scale coordinates to [0, 2*pi]
+    theta = (pos / box_size) * 2 * np.pi
+    
+    # 2. Transform to unit circle (cos, sin)
+    xi = np.cos(theta)
+    zeta = np.sin(theta)
+    
+    # 3. Average the circle coordinates
+    mean_xi = np.mean(xi, axis=0)
+    mean_zeta = np.mean(zeta, axis=0)
+    
+    # 4. Map back to angle space [0, 2*pi]
+    mean_theta = np.arctan2(-mean_zeta, -mean_xi) + np.pi
+    
+    # 5. Transform back to box coordinates
+    com = (mean_theta / (2 * np.pi)) * box_size
+    return com
+
+def Rg(pos):
+    """
+    pos: (N, 3) numpy array of x, y, z centers
+    """
+    dists_sq = np.sum((pos - com(pos))**2, axis=1)  # square distance to CoM
+    return np.sqrt(np.mean(dists_sq))  # root mean square distance
