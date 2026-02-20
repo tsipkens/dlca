@@ -6,7 +6,7 @@ A relatively simple code to perform diffusion-limited cluster agglomeration (DLC
 
 ### Scaling aggregates to mass-mobility relation
 
-Simulations occur in radius units (i.e., 1 length unit = RADIUS) of the monomers. 
+Simulations occur in radius units (i.e., 1 length unit = 1 MONOMER RADIUS). 
 
 Consider a mass-mobility relation of
 
@@ -18,5 +18,5 @@ $\frac{d_{g}}{d_{g,1}} = d_{g,1} ^ {-\zeta / (\zeta - 3)} \left(\frac{N \rho_m \
 
 The quantity on the left acts to scale the entire aggregate up to match the given expression. 
 
-Dispersion can be achieved by sampling $m_{100}$ from a lognormal distribution, cenetered on an expected geometric mean for $m_{100}$. 
+Dispersion can be achieved by sampling $m_{100}$ from a lognormal distribution, centered on an expected geometric mean for $m_{100}$. 
 
