@@ -12,7 +12,7 @@ DIFFUSION_DT = ((0.1*2)**2/2) * RADIUS ** 2  # diffusion coefficient * time step
 
 
 # ----- Function to run simulation -----
-def run(n_particles, seed_density, f_xyz=True, f_plot=False, output_folder='outputs'):
+def run(n_particles, seed_density, f_xyz=1, f_plot=False, output_folder='outputs'):
     """
     Run a single DLCA simulation.
 
@@ -22,8 +22,10 @@ def run(n_particles, seed_density, f_xyz=True, f_plot=False, output_folder='outp
         The initial number of particles to spawn.
     seed_density : float
         A number density used to calculate the simulation box size [#/RADIUS^3].
-    f_xyz : bool, default=True
-        If True, writes coordinates to an .xyz trajectory file at regular intervals.
+    f_xyz : int, default=1
+        If 1, writes final coordinates to an .xyz file.
+        If 2, writes .xyz trajectory file at regular intervals.
+        Else, does not write .xyz file.
     f_plot : bool, default=False
         If True, initializes and updates a live 3D Matplotlib visualization.
 
@@ -61,7 +63,7 @@ def run(n_particles, seed_density, f_xyz=True, f_plot=False, output_folder='outp
 
     # Write to XYZ.
     fn = f'{output_folder}\\agg_{id}_run.xyz'
-    if f_xyz:
+    if f_xyz == 2:
         tools.write_xyz(pos, RADIUS, c=aggs, filename=fn, comment=f'box_size={box_size}')
 
     # For live plot. 
@@ -121,7 +123,7 @@ def run(n_particles, seed_density, f_xyz=True, f_plot=False, output_folder='outp
         if f_plot:
             if step % 100 == 0:
                 tools.update_live_plot(fig, scat, pos, aggs)  # update live plot in Jupyter
-        if f_xyz:
+        if f_xyz == 2:
             if step % 50 == 0 or dsu.agg_count == 1:
                 tools.write_xyz(pos, RADIUS, c=dsu.flatten(), write_mode='a', filename=fn, comment=f'box_size={box_size}')  # write XYZ coordinates
 
@@ -131,7 +133,7 @@ def run(n_particles, seed_density, f_xyz=True, f_plot=False, output_folder='outp
             break
 
     pos = tools.unwrap(pos, box_size, RADIUS)  # center agg in box before final write
-    if f_xyz:
+    if f_xyz == 1:
         tools.write_xyz(pos, RADIUS, c=aggs, filename=f'{output_folder}\\agg_{id}_final.xyz', comment=f'box_size={box_size}')  # write XYZ coordinates
     
     print('\n' + tools.get_ascii_2d(pos, left=18, color=color))
