@@ -12,7 +12,7 @@ DIFFUSION_DT = ((0.1*2)**2/2) * RADIUS ** 2  # diffusion coefficient * time step
 
 
 # ----- Function to run simulation -----
-def run(n_particles, seed_density, f_xyz=True, f_plot=False):
+def run(n_particles, seed_density, f_xyz=True, f_plot=False, output_folder='outputs'):
     """
     Run a single DLCA simulation.
 
@@ -60,9 +60,9 @@ def run(n_particles, seed_density, f_xyz=True, f_plot=False):
     aggs = dsu.flatten()  # extract cluster IDs from dsu
 
     # Write to XYZ.
-    fn = f'outputs\\agg_{id}_run.xyz'
+    fn = f'{output_folder}\\agg_{id}_run.xyz'
     if f_xyz:
-        tools.write_xyz(pos, RADIUS, c=aggs, filename=fn)
+        tools.write_xyz(pos, RADIUS, c=aggs, filename=fn, comment=f'box_size={box_size}')
 
     # For live plot. 
     if f_plot:
@@ -71,6 +71,7 @@ def run(n_particles, seed_density, f_xyz=True, f_plot=False):
         scat = tools.init_live_plot(pos, c=aggs, ax=ax)
 
     # ---------------- MAIN TIME LOOP ---------------------
+    color = "\033[31m"  # printing color afterwards, red if not converged
     for step in (pbar := tqdm(range(steps))):
         # 1. Sync IDs and get counts
         # Using bincount is much faster than np.unique for integer IDs.
@@ -122,15 +123,16 @@ def run(n_particles, seed_density, f_xyz=True, f_plot=False):
                 tools.update_live_plot(fig, scat, pos, aggs)  # update live plot in Jupyter
         if f_xyz:
             if step % 50 == 0 or dsu.agg_count == 1:
-                tools.write_xyz(pos, RADIUS, c=dsu.flatten(), write_mode='a', filename=fn)  # write XYZ coordinates
+                tools.write_xyz(pos, RADIUS, c=dsu.flatten(), write_mode='a', filename=fn, comment=f'box_size={box_size}')  # write XYZ coordinates
 
         # Check finishing conditions and print corresponding text. 
         if dsu.agg_count == 1:
+            color = "\033[92m"
             break
 
-    pos = tools.unwrap(pos, box_size)  # center agg in box before final write
+    pos = tools.unwrap(pos, box_size, RADIUS)  # center agg in box before final write
     if f_xyz:
-        tools.write_xyz(pos, RADIUS, c=aggs, filename=f'outputs\\agg_{id}_final.xyz')  # write XYZ coordinates
+        tools.write_xyz(pos, RADIUS, c=aggs, filename=f'{output_folder}\\agg_{id}_final.xyz', comment=f'box_size={box_size}')  # write XYZ coordinates
     
     print('\n' + tools.get_ascii_2d(pos, left=18, color=color))
     print('\n' + '-'*66)

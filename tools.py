@@ -116,6 +116,23 @@ def write_xyz(pos, r, c=None, filename=f"outputs\\aggregate.xyz", comment="DLA C
     except Exception as e:
         print(f"Error writing XYZ file: {e}")
 
+def read_xyz(filename):
+    """
+    Reads a single-frame XYZ file.
+    Returns: (N, 3) array of positions and a list of atom names.
+    """
+    with open(filename, 'r') as f:
+        n_particles = int(f.readline())
+        comment = f.readline()
+        
+    # Use loadtxt to skip the first two lines
+    # usecols=(1, 2, 3) assumes column 0 is the atom name (e.g., 'C')
+    read = np.loadtxt(filename, skiprows=2, usecols=(0, 1, 2, 3))
+    pos = read[:, :3]
+    radius = read[:, 3]
+    
+    return pos, radius
+
 
 def init_particles(n, box, r):
     """
