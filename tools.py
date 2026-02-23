@@ -407,20 +407,85 @@ def projected_area(pos, radius=1, view=[1,0,0], n_samples=int(1e6)):
     return A, da
 
 
-    # 5. Rasterize circles onto boolean grid
-    x_coords = np.linspace(x_min, x_max, nx)
-    y_coords = np.linspace(y_min, y_max, ny)
-    grid_x, grid_y = np.meshgrid(x_coords, y_coords)
+def random_view(n_proj):
+    """
+    Get random views for projection calculations.
+    """
+    # 1. Sample 3 values from a standard normal distribution (mean=0, std=1)
+    vec = np.random.standard_normal((n_proj, 3))
+        
+    # 2. Normalize the vector to place it on the surface of a unit sphere
+    mag = np.linalg.norm(vec, axis=1, keepdims=True)
+
+    return vec / mag
+
+
+def ave_projected_area(pos, n_proj=100, radius=1, n_samples=int(1e5), views=None):
+    """
+    Wrapper for projected_area to average over directions.
+
+    n_proj : int
+        Number of direction to use when averaging
+    n_samples : int
+        Number of samples per view/projection.
+        Total number of samples = n_proj * n_samples.
+    """
+
+    # Initialize array to contain areas.
+    A = np.zeros(n_proj)
+
+    # If views not provided, compute new random ones. 
+    # Giving a views input allows for repeatable/comparable calculations.
+    if views is None:
+        views = random_view(n_proj)
+
+    # Compute projected area for each view.
+    print('Resolving random views for projected area:')
+    for ii in tqdm(range(n_proj)):
+        A[ii] = projected_area(pos, radius, view=views[ii], n_samples=n_samples)[0]
+    print('DONE!\n')
     
-    # Mask starts as all False (empty)
-    occupied = np.zeros_like(grid_x, dtype=bool)
+    # Summarize output.
+    A = np.mean(np.array(A))  # convert area to an average of list
+    da = 2 * np.sqrt(A / np.pi)  # computed projected area diameter on average
 
-    # For each particle, mark its "shadow" on the grid
-    for i in range(len(xy)):
-        # Optimization: only check pixels in the bounding box of the specific circle
-        dist_sq = (grid_x - xy[i,0])**2 + (grid_y - xy[i,1])**2
-        occupied |= (dist_sq <= radius**2)
+    return A, da
 
-    # 6. Sum area
-    pixel_area = (w / (nx - 1)) * (h / (ny - 1))
-    return np.sum(occupied) * pixel_area
+
+def scale_agg(pos, radius=1, rho_100=510, zet=2.48, rho_m=1860, rho_gsd=1):
+    """
+    Scale agg to like on a specified mass-mobility relation. 
+    NOTE: Projected area is taken as equal to the mobility. 
+
+    Parameters:
+    -----------
+    pos : ndarray (N, 3)
+        x, y, z coordinates
+    rho_gsd : float
+        Geometric standard deviation (GSD) on rho_100 to randomly perturb from relation.
+        Assumes lognormal conditional distribution about main relation. 
+    """
+
+    npp = len(pos)  # number of monomers
+    dm1 = ave_projected_area(pos)[1]  # get projected area diameter for mobility
+
+    # Randomly perturb rho_100 based on provided GSD.
+    if rho_gsd > 1:
+        rho_100 = rho_100 * np.exp(np.log(rho_gsd) * np.random.standard_normal(1))
+
+    d100 = 100  # reference point for relation (assumed nm)
+
+    # dimensionless combination of diameters with various powers. 
+    diam_fact = d100**(zet-3) * (2 * radius)**3 / (dm1**zet)
+
+    scale = (diam_fact * npp * rho_m / rho_100) ** (1 / (zet - 3))  # dimensionless scale factor
+
+    radius = scale * radius
+    pos = scale * pos
+
+    return pos, radius
+
+
+
+
+
