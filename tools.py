@@ -362,85 +362,69 @@ def Rg(pos):
     return np.sqrt(np.mean(dists_sq))  # root mean square distance
 
 
-def projected_area(pos, radius=1, view=[1,0,0], n_samples=int(1e6)):
+def projected_area(pos, radius, n_rays=int(1e5), view=None):
     """
-    Computes projected area using optimized Monte Carlo integration.
+    Computes the orientation-averaged projected area using 
+    stochastic orthographic ray tracing.
     """
-    v = np.asarray(view) / np.linalg.norm(view)
-    z_axis = np.array([0, 0, 1])
+    # 1. Center the cluster
+    pos = pos - np.mean(pos, axis=0)
     
-    # 1. Faster Rotation check
-    if not np.allclose(v, z_axis):
-        # Using a more direct rotation calculation if possible
-        rot_axis = np.cross(v, z_axis)
-        norm = np.linalg.norm(rot_axis)
-        if norm > 1e-9:
-            rot_axis /= norm
-            angle = np.arccos(np.clip(np.dot(v, z_axis), -1.0, 1.0))
-            projected_pos = R.from_rotvec(rot_axis * angle).apply(pos)
-        else: # Case where v is [0,0,-1]
-            projected_pos = pos * np.array([1, 1, -1])
-    else:
-        projected_pos = pos
+    # 2. Determine the size of the "shooting gallery"
+    # The rays must cover the entire potential shadow
+    max_dist = np.max(np.linalg.norm(pos, axis=1)) + radius
+    # The area of the circle the rays are sampled from
+    source_area = np.pi * (max_dist**2)
 
-    xy = projected_pos[:, :2]
-
-    # 2. Bounding Box
-    mins = np.min(xy, axis=0) - radius
-    maxs = np.max(xy, axis=0) + radius
-    box_area = (maxs[0] - mins[0]) * (maxs[1] - mins[1])
-
-    # 3. Generate Random Samples
-    samples = np.random.uniform(mins, maxs, (n_samples, 2))
-
-    # 4. Optimized Hit Check
-    # Instead of query_ball_point (which returns lists), use query (returns distances)
-    tree = cKDTree(xy)
-    dists, _ = tree.query(samples, k=1, workers=-1) # k=1 is the nearest neighbor
+    # 3. Generate rays
+    if view == None:  # then use random directions
+        vecs = np.random.standard_normal((n_rays, 3))
+    else:  # otherwise, align all of the vectors in one direction
+        vecs = view * np.ones((n_rays, 1))
+    unit_vecs = vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
     
-    # Hits are where the nearest neighbor is closer than radius
-    num_hits = np.count_nonzero(dists <= radius)
+    # Random offsets in the 2D plane perpendicular to the direction
+    # Using the "Disk Sampling" method
+    r = max_dist * np.sqrt(np.random.random(n_rays))
+    theta = 2 * np.pi * np.random.random(n_rays)
+    
+    # Create two orthogonal vectors for the disk plane
+    # We'll use a fast vectorized trick to find an orthogonal vector
+    u = np.cross(unit_vecs, [1, 0, 0])
+    mask = np.linalg.norm(u, axis=1) < 1e-6
+    u[mask] = np.cross(unit_vecs[mask], [0, 1, 0])
+    u /= np.linalg.norm(u, axis=1, keepdims=True)
+    w = np.cross(unit_vecs, u)
+    
+    # Points on the "disk" that move along the ray
+    ray_origins = (r[:, None] * np.cos(theta)[:, None] * u) + \
+                  (r[:, None] * np.sin(theta)[:, None] * w)
 
-    area = box_area * (num_hits / n_samples)
+    # 4. Intersection Check: Ray-Sphere
+    # For each ray (origin O, direction D), the distance to a particle P is:
+    # dist = || (P - O) - ((P - O) · D) * D ||
+    # We use a subset of particles or a KDTree to make this faster
+    # For extreme efficiency, we'll use the "Nearest Neighbor" check
+    
+    # For large n_rays, we chunk this to save memory
+    for ii in range(len(pos)):
+        # Calculate distance from this particle to ALL rays
+        # Vector from ray origin to particle
+        op = pos[ii] - ray_origins 
+        # Projection of op onto the ray direction
+        proj = np.einsum('ij,ij->i', op, unit_vecs)
+        # Perpendicular distance squared
+        dist_sq = np.sum(op**2, axis=1) - proj**2
+        
+        # If any ray passes within 'radius' of this particle, mark it (this is a bit complex)
+        # Better: keep a boolean 'hit' array for all rays
+        if ii == 0: hit_mask = (dist_sq <= radius**2)
+        else: hit_mask |= (dist_sq <= radius**2)
+
+    area = source_area * (np.sum(hit_mask) / n_rays)
     da = 2 * np.sqrt(area / np.pi)
 
     return area, da
-
-
-def random_view(n_proj):
-    """
-    Get random views for projection calculations.
-    Getting views prior to calling projected area calculations can make calculations repeatable.
-    """
-    vec = np.random.standard_normal((n_proj, 3))  # random direction
-    return vec / np.linalg.norm(vec, axis=1, keepdims=True)  # normalize to unit vector
-
-def ave_projected_area(pos, n_proj=200, radius=1, n_samples=int(1e5), views=None):
-    """
-    Wrapper for projected_area to average over directions.
-
-    n_proj : int
-        Number of direction to use when averaging
-    n_samples : int
-        Number of samples per view/projection.
-        Total number of samples = n_proj * n_samples.
-    """
-
-    # If views not provided, compute new random ones. 
-    # Giving a views input allows for repeatable/comparable calculations.
-    if views is None:
-        views = random_view(n_proj)
-    
-    # Initialize array to contain areas.
-    areas = np.zeros(n_proj)
-    
-    for ii in tqdm(range(n_proj), desc="Projecting"):
-        areas[ii], _ = projected_area(pos, radius, view=views[ii], n_samples=n_samples)
-    
-    mean_a = np.mean(areas)
-    mean_da = 2 * np.sqrt(mean_a / np.pi)
-
-    return mean_a, mean_da
 
 
 def scale_agg(pos, radius=1, rho_100=510, zet=2.48, rho_m=1860, rho_gsd=1, da1=None):
@@ -461,7 +445,7 @@ def scale_agg(pos, radius=1, rho_100=510, zet=2.48, rho_m=1860, rho_gsd=1, da1=N
 
     # If not provided, get projected area diameter for mobility using random views.
     if da1 is None:
-        da1 = ave_projected_area(pos)[1]
+        da1 = projected_area(pos)[1]
 
     npp = len(pos)  # number of monomers
 
@@ -476,12 +460,15 @@ def scale_agg(pos, radius=1, rho_100=510, zet=2.48, rho_m=1860, rho_gsd=1, da1=N
 
     scale = (diam_fact * npp * rho_m / rho_100) ** (1 / (zet - 3))  # dimensionless scale factor
 
-    radius = scale * radius
-    pos = scale * pos
-
-    return pos, radius
+    return scale * pos, scale * radius, scale * da1
 
 
+def rho_eff(pos, rho_m=1860, dpp=2, da=None):
 
+    # If not provided, get projected area diameter for mobility using random views.
+    if da is None:
+        da = projected_area(pos)[1]
+
+    return rho_m * len(pos) * (dpp / da) ** 3
 
 
