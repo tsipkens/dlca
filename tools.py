@@ -362,7 +362,21 @@ def Rg(pos):
     return np.sqrt(np.mean(dists_sq))  # root mean square distance
 
 
-def projected_area(pos, radius, n_rays=int(1e5), view=None):
+# def _ray_trace_engine(pos, radius, view, rays):
+#     """Internal core: Handles rotation and spatial querying."""
+#     # 1. Rotate
+#     v = np.asarray(view) / np.linalg.norm(view)
+#     z_axis = np.array([0, 0, 1])
+#     if not np.allclose(v, z_axis):
+#         rot = R.from_rotvec(np.cross(v, z_axis) * np.arccos(np.dot(v, z_axis)))
+#         pos = rot.apply(pos)
+    
+#     # 2. Query
+#     tree = cKDTree(pos[:, :2])
+#     return tree.query_ball_point(rays, r=radius)
+
+
+def projected_area(pos, radius=1, n_rays=int(1e5), view=None):
     """
     Computes the orientation-averaged projected area using 
     stochastic orthographic ray tracing.
@@ -425,6 +439,78 @@ def projected_area(pos, radius, n_rays=int(1e5), view=None):
     da = 2 * np.sqrt(area / np.pi)
 
     return area, da
+
+
+def projected_density(pos, radius=1, view=[0,0,1], resolution=512):
+    """
+    Generates a regular grid of rays to produce a projected density image.
+    
+    Parameters:
+    -----------
+    pos : ndarray (N, 3)
+        X, Y, Z coordinates.
+    radius : float
+        Monomer radius.
+    view : array-like (3,)
+        The direction to look along.
+    resolution : int
+        The number of pixels along the largest dimension of the image.
+    """
+    # 1. Align the aggregate to the view vector (View -> Z-axis)
+    v = np.asarray(view) / np.linalg.norm(view)
+    z_axis = np.array([0, 0, 1])
+    
+    if not np.allclose(v, z_axis):
+        # Handle the case for looking exactly backwards
+        if np.allclose(v, -z_axis):
+            projected_pos = pos * np.array([1, 1, -1])
+        else:
+            rot_axis = np.cross(v, z_axis)
+            rot_axis /= np.linalg.norm(rot_axis)
+            angle = np.arccos(np.clip(np.dot(v, z_axis), -1.0, 1.0))
+            projected_pos = R.from_rotvec(rot_axis * angle).apply(pos)
+    else:
+        projected_pos = pos
+
+    # 2. Extract 2D projection
+    xy = projected_pos[:, :2]
+    
+    # 3. Define Bounding Box and Grid
+    x_min, y_min = np.min(xy, axis=0) - radius
+    x_max, y_max = np.max(xy, axis=0) + radius
+    
+    width = x_max - x_min
+    height = y_max - y_min
+    
+    # Maintain aspect ratio for square pixels
+    if width > height:
+        nx = resolution
+        ny = int(resolution * (height / width))
+    else:
+        ny = resolution
+        nx = int(resolution * (width / height))
+        
+    # Create the evenly spaced rays
+    x_range = np.linspace(x_min, x_max, nx)
+    y_range = np.linspace(y_min, y_max, ny)
+    grid_x, grid_y = np.meshgrid(x_range, y_range)
+    pixel_centers = np.vstack([grid_x.ravel(), grid_y.ravel()]).T
+
+    # 4. Use KDTree to count intersections per ray
+    tree = cKDTree(xy)
+    # query_ball_point finds all spheres within 'radius' of the ray center
+    hits = tree.query_ball_point(pixel_centers, r=radius)
+    
+    # 5. Build the image array
+    # count how many indices were returned for each pixel
+    counts = np.array([len(h) for h in hits])
+    image = counts.reshape((ny, nx))
+
+    # Format extent.
+    extent = (x_min, x_max, y_min, y_max)
+    
+    # Flip the image vertically to match standard coordinate plotting
+    return np.flipud(image), extent
 
 
 def scale_agg(pos, radius=1, rho_100=510, zet=2.48, rho_m=1860, rho_gsd=1, da1=None):
