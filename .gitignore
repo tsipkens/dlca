@@ -1,10 +1,12 @@
 # CUstom. 
 ftp/
+db/
 dla/
 archive/
 autils/
 data_out/
 outputs/
+main_w*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -2,11 +2,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import cKDTree
+from collections import deque
 from IPython.display import display, clear_output  # for live plot in Python
 import time
-
-
-
 
 
 
@@ -213,32 +211,73 @@ def get_ascii_2d(pos, box_size=None, res=(10, 25), left=0):
     return out
 
 
-def unwrap(pos, box_size, origin=None):
+
+def unwrap(pos, box_size, radius, origin=None):
     """
-    Unwraps a cluster of coordinates relative to the first particle.
-    pos: (N, 3) array
-    box_length: (1,) box dimension
-    origin: (1,) triples and forms the center of the aggregate
+    Unwraps periodic boundary conditions for a connected cluster of particles.
+    
+    Parameters:
+    -----------
+    pos : ndarray (N, 3)
+        Wrapped x, y, z coordinates.
+    box_size : float or array-like
+        The dimensions of the simulation box.
+    radius : float
+        Particle radius used to build r_threshold.
+        (threshold usually 2 * RADIUS + small epsilon).
+    origin : ndarray (1, 3)
+        Origin on which to center particle after unwrapping.
+        
+    Returns:
+    --------
+    unwrapped_pos : ndarray (N, 3)
+        Coordinates shifted out of the [0, box_size] range to be contiguous.
     """
 
+    # Parse origin input. Used to center cluster below.
     if origin is None:
-        origin = box_size/2
+        origin = box_size/2  # default is center of the box
 
-    # 1. Pick a reference point (the first particle is standard)
-    reference = pos[0]
-    
-    # 2. Calculate the raw displacement from the reference
-    diff = pos - reference
-    
-    # 3. Apply the Minimum Image Convention (MIC)
-    # This finds the shortest distance across the periodic boundary
-    # If diff > L/2, it subtracts L. If diff < -L/2, it adds L.
-    periodic_diff = diff - box_size * np.round(diff / box_size)
-    
-    # 4. Reconstruct the unwrapped coordinates
-    unwrapped_pos = reference + periodic_diff
+    r_threshold = 2.05 * radius  # threshold to be considered connected
 
-    # 5. Center the particle about to origin. 
+    n_particles = len(pos)  # number of particles
+    unwrapped_pos = np.copy(pos).astype(float) # initialize unwrapped positions
+    
+    # 1. Build Neighbor List (respecting PBC)
+    # + Get all pairs within the connectivity threshold
+    tree = cKDTree(pos, boxsize=box_size)
+    adj_list = tree.query_ball_tree(tree, r=r_threshold)
+    
+    # 2. Track visited particles
+    visited = np.zeros(n_particles, dtype=bool)
+    
+    # Iterate through all particles to handle multiple disconnected aggregates
+    for seed_idx in range(n_particles):
+        if visited[seed_idx]:  # already considered, so skip
+            continue
+            
+        # BFS Queue: (current_particle_index)
+        queue = deque([seed_idx])
+        visited[seed_idx] = True
+        
+        while queue:
+            curr = queue.popleft()
+            
+            for neighbor in adj_list[curr]:
+                if not visited[neighbor]:
+                    # 3. Calculate the periodic shift
+                    # 'diff' is the vector from current to neighbor
+                    diff = unwrapped_pos[neighbor] - unwrapped_pos[curr]
+                    
+                    # Find the nearest image shift
+                    # If diff is > box/2, it means it wrapped; this pulls it back.
+                    shift = np.round(diff / box_size) * box_size
+                    unwrapped_pos[neighbor] -= shift
+                    
+                    visited[neighbor] = True
+                    queue.append(neighbor)
+
+    # 4. Recenter agg at specified origin.
     unwrapped_pos = unwrapped_pos - np.mean(unwrapped_pos, axis=0) + origin
     
     return unwrapped_pos
