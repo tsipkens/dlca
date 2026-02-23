@@ -9,7 +9,7 @@ from collections import deque
 from IPython.display import display, clear_output  # for live plot in Python
 import time
 
-
+from tqdm import tqdm
 
 
 # ----- Discrete Set Union (DSU) Helper Class -----
@@ -362,59 +362,50 @@ def Rg(pos):
     return np.sqrt(np.mean(dists_sq))  # root mean square distance
 
 
-def projected_area(pos, radius=1, view_vector=[1,0,0], res0=100):
+def projected_area(pos, radius=1, view=[1,0,0], n_samples=int(1e6)):
     """
-    Computes projected area of overlapping spheres along a specific vector.
+    Computes projected area using Monte Carlo integration.
+    """
+    # 1. Rotate to align view with Z-axis
+    v = np.array(view) / np.linalg.norm(view)
+    z_axis = np.array([0, 0, 1])
     
-    Parameters:
-    -----------
-    pos : ndarray (N, 3)
-        X, Y, Z coordinates of particles.
-    radius : float
-        Radius of the spheres.
-    view_vector : array-like (3,)
-        The direction vector to look along.
-    res0 : float
-        Resolution per particle.
-    """
-
-    resolution = res0 * len(pos)  # increase with number of particles
-
-    # 1. Normalize the view vector
-    v = np.array(view_vector) / np.linalg.norm(view_vector)
-    z_axis = np.array([0, 0, 1])  # define z-direction
-
-    # 2. Create rotation to align view_vector with Z-axis
-    # Uses scipy transformation and rotation matrix. 
+    # Rotate particles
     if not np.allclose(v, z_axis):
-        # Calculate rotation axis (cross product)
         rot_axis = np.cross(v, z_axis)
         rot_axis /= np.linalg.norm(rot_axis)
-
-        # Calculate angle (dot product)
         angle = np.arccos(np.clip(np.dot(v, z_axis), -1.0, 1.0))
-
-        # Apply rotation
-        rot = R.from_rotvec(rot_axis * angle)
-        projected_pos = rot.apply(pos)
+        projected_pos = R.from_rotvec(rot_axis * angle).apply(pos)
     else:
-        projected_pos = pos
+        projected_pos = np.asarray(pos)
 
-    # 3. Flatten to 2D (ignore new Z)
     xy = projected_pos[:, :2]
 
-    # 4. Define Grid
+    # 2. Define bounding box based on min/max + radius.
     x_min, y_min = np.min(xy, axis=0) - radius
     x_max, y_max = np.max(xy, axis=0) + radius
+    box_area = (x_max - x_min) * (y_max - y_min)
+
+    # 3. Generate Random Samples
+    samples = np.random.uniform([x_min, y_min], [x_max, y_max], (n_samples, 2))
+
+    # 4. Check hits (vectorized using KDTree for speed)
+    # This is much faster than a loop for large sample sizes
+    from scipy.spatial import cKDTree
+    tree = cKDTree(xy)
     
-    # Maintain aspect ratio for the grid
-    w, h = x_max - x_min, y_max - y_min
-    if w > h:
-        nx = resolution
-        ny = int(resolution * (h / w))
-    else:
-        ny = resolution
-        nx = int(resolution * (w / h))
+    # If any sample is within 'radius' of a center, it's a hit
+    # query_ball_point returns indices; we just need to know if the list is non-empty
+    hits = tree.query_ball_point(samples, r=radius, return_sorted=False)
+    
+    # count how many sample points had at least one neighbor within radius
+    num_hits = sum(1 for h in hits if len(h) > 0)
+
+    A = box_area * (num_hits / n_samples)  # projected area
+    da = 2 * np.sqrt(A / np.pi)  # projected area diameter
+
+    return A, da
+
 
     # 5. Rasterize circles onto boolean grid
     x_coords = np.linspace(x_min, x_max, nx)
