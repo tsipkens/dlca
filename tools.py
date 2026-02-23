@@ -364,63 +364,58 @@ def Rg(pos):
 
 def projected_area(pos, radius=1, view=[1,0,0], n_samples=int(1e6)):
     """
-    Computes projected area using Monte Carlo integration.
+    Computes projected area using optimized Monte Carlo integration.
     """
-    # 1. Rotate to align view with Z-axis
-    v = np.array(view) / np.linalg.norm(view)
+    v = np.asarray(view) / np.linalg.norm(view)
     z_axis = np.array([0, 0, 1])
     
-    # Rotate particles
+    # 1. Faster Rotation check
     if not np.allclose(v, z_axis):
+        # Using a more direct rotation calculation if possible
         rot_axis = np.cross(v, z_axis)
-        rot_axis /= np.linalg.norm(rot_axis)
-        angle = np.arccos(np.clip(np.dot(v, z_axis), -1.0, 1.0))
-        projected_pos = R.from_rotvec(rot_axis * angle).apply(pos)
+        norm = np.linalg.norm(rot_axis)
+        if norm > 1e-9:
+            rot_axis /= norm
+            angle = np.arccos(np.clip(np.dot(v, z_axis), -1.0, 1.0))
+            projected_pos = R.from_rotvec(rot_axis * angle).apply(pos)
+        else: # Case where v is [0,0,-1]
+            projected_pos = pos * np.array([1, 1, -1])
     else:
-        projected_pos = np.asarray(pos)
+        projected_pos = pos
 
     xy = projected_pos[:, :2]
 
-    # 2. Define bounding box based on min/max + radius.
-    x_min, y_min = np.min(xy, axis=0) - radius
-    x_max, y_max = np.max(xy, axis=0) + radius
-    box_area = (x_max - x_min) * (y_max - y_min)
+    # 2. Bounding Box
+    mins = np.min(xy, axis=0) - radius
+    maxs = np.max(xy, axis=0) + radius
+    box_area = (maxs[0] - mins[0]) * (maxs[1] - mins[1])
 
     # 3. Generate Random Samples
-    samples = np.random.uniform([x_min, y_min], [x_max, y_max], (n_samples, 2))
+    samples = np.random.uniform(mins, maxs, (n_samples, 2))
 
-    # 4. Check hits (vectorized using KDTree for speed)
-    # This is much faster than a loop for large sample sizes
-    from scipy.spatial import cKDTree
+    # 4. Optimized Hit Check
+    # Instead of query_ball_point (which returns lists), use query (returns distances)
     tree = cKDTree(xy)
+    dists, _ = tree.query(samples, k=1, workers=-1) # k=1 is the nearest neighbor
     
-    # If any sample is within 'radius' of a center, it's a hit
-    # query_ball_point returns indices; we just need to know if the list is non-empty
-    hits = tree.query_ball_point(samples, r=radius, return_sorted=False)
-    
-    # count how many sample points had at least one neighbor within radius
-    num_hits = sum(1 for h in hits if len(h) > 0)
+    # Hits are where the nearest neighbor is closer than radius
+    num_hits = np.count_nonzero(dists <= radius)
 
-    A = box_area * (num_hits / n_samples)  # projected area
-    da = 2 * np.sqrt(A / np.pi)  # projected area diameter
+    area = box_area * (num_hits / n_samples)
+    da = 2 * np.sqrt(area / np.pi)
 
-    return A, da
+    return area, da
 
 
 def random_view(n_proj):
     """
     Get random views for projection calculations.
+    Getting views prior to calling projected area calculations can make calculations repeatable.
     """
-    # 1. Sample 3 values from a standard normal distribution (mean=0, std=1)
-    vec = np.random.standard_normal((n_proj, 3))
-        
-    # 2. Normalize the vector to place it on the surface of a unit sphere
-    mag = np.linalg.norm(vec, axis=1, keepdims=True)
+    vec = np.random.standard_normal((n_proj, 3))  # random direction
+    return vec / np.linalg.norm(vec, axis=1, keepdims=True)  # normalize to unit vector
 
-    return vec / mag
-
-
-def ave_projected_area(pos, n_proj=100, radius=1, n_samples=int(1e5), views=None):
+def ave_projected_area(pos, n_proj=200, radius=1, n_samples=int(1e5), views=None):
     """
     Wrapper for projected_area to average over directions.
 
@@ -431,43 +426,44 @@ def ave_projected_area(pos, n_proj=100, radius=1, n_samples=int(1e5), views=None
         Total number of samples = n_proj * n_samples.
     """
 
-    # Initialize array to contain areas.
-    A = np.zeros(n_proj)
-
     # If views not provided, compute new random ones. 
     # Giving a views input allows for repeatable/comparable calculations.
     if views is None:
         views = random_view(n_proj)
-
-    # Compute projected area for each view.
-    print('Resolving random views for projected area:')
-    for ii in tqdm(range(n_proj)):
-        A[ii] = projected_area(pos, radius, view=views[ii], n_samples=n_samples)[0]
-    print('DONE!\n')
     
-    # Summarize output.
-    A = np.mean(np.array(A))  # convert area to an average of list
-    da = 2 * np.sqrt(A / np.pi)  # computed projected area diameter on average
+    # Initialize array to contain areas.
+    areas = np.zeros(n_proj)
+    
+    for ii in tqdm(range(n_proj), desc="Projecting"):
+        areas[ii], _ = projected_area(pos, radius, view=views[ii], n_samples=n_samples)
+    
+    mean_a = np.mean(areas)
+    mean_da = 2 * np.sqrt(mean_a / np.pi)
 
-    return A, da
+    return mean_a, mean_da
 
 
-def scale_agg(pos, radius=1, rho_100=510, zet=2.48, rho_m=1860, rho_gsd=1):
+def scale_agg(pos, radius=1, rho_100=510, zet=2.48, rho_m=1860, rho_gsd=1, da1=None):
     """
-    Scale agg to like on a specified mass-mobility relation. 
+    Scale agg to lie on a specified mass-mobility relation. 
     NOTE: Projected area is taken as equal to the mobility. 
 
     Parameters:
     -----------
     pos : ndarray (N, 3)
         x, y, z coordinates
+    radius : float
+        Radius of monomers in the simulation.
     rho_gsd : float
         Geometric standard deviation (GSD) on rho_100 to randomly perturb from relation.
         Assumes lognormal conditional distribution about main relation. 
     """
 
+    # If not provided, get projected area diameter for mobility using random views.
+    if da1 is None:
+        da1 = ave_projected_area(pos)[1]
+
     npp = len(pos)  # number of monomers
-    dm1 = ave_projected_area(pos)[1]  # get projected area diameter for mobility
 
     # Randomly perturb rho_100 based on provided GSD.
     if rho_gsd > 1:
@@ -476,7 +472,7 @@ def scale_agg(pos, radius=1, rho_100=510, zet=2.48, rho_m=1860, rho_gsd=1):
     d100 = 100  # reference point for relation (assumed nm)
 
     # dimensionless combination of diameters with various powers. 
-    diam_fact = d100**(zet-3) * (2 * radius)**3 / (dm1**zet)
+    diam_fact = d100**(zet-3) * (2 * radius)**3 / (da1**zet)
 
     scale = (diam_fact * npp * rho_m / rho_100) ** (1 / (zet - 3))  # dimensionless scale factor
 
