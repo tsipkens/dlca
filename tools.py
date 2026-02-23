@@ -197,11 +197,16 @@ def get_ascii_2d(pos, box_size=None, res=(10, 25), left=0, color="\033[92m"):
     res: (rows, cols)
     """
 
-    # Shrink box to domain of particles for viz.
+    # Shrink box to domain of particles for viz if not given.
     if box_size == None:
         pos = pos - np.min(pos, axis=0)  # wrap box up to min
         box_size = np.max(pos)  # get max remaining
         pos = pos + (box_size - np.max(pos, axis=0)) / 2  # center in remaining box
+        
+        # If small aggregate, scale res down so more representative.
+        # Otherwise circles are very far apart in viz. 
+        if box_size < np.max(res):
+            res = 2 * np.floor(res / np.max(res) * box_size).astype(int)
 
     rows, cols = res
     grid = np.full((rows, cols), " ")
