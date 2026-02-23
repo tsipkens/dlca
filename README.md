@@ -1,26 +1,26 @@
+# DLCA
 
-# dlca
+Agglomerate Simulation Framework
 
-A relatively simple code to perform diffusion-limited cluster agglomeration (DLCA).
+Simulations are performed in radius units, where **1 length unit = 1 monomer radius**. Translation to a meaningful scale is described below. 
 
 
-### Scaling aggregates to mass-mobility relation
+### Mass-Mobility Relations
 
-Simulations occur in radius units (i.e., 1 length unit = 1 MONOMER RADIUS). 
+We define the mass-mobility relation using the following expressions:
 
-Consider a mass-mobility relation of
-
-$m = m_{100} (d_{A} / d_{100}) ^ {\zeta}$
+$$m = m_{100} (d_{A} / d_{100}) ^ {\zeta}$$
 
 or, equivalently, 
 
-${\rho}_{eff} = {\rho}_{100} (d_{A} / d_{100}) ^ {\zeta - 3}$
+$$\rho_{eff} = \rho_{100} (d_{A} / d_{100}) ^ {\zeta - 3},$$
 
-Under these conditions, one can compute an estimate of the mobility diameter of the agglomerate (e.g., from projected area diameter) in radius units, which we define as $d_{g,1}$. Then, equating the mass from summing the mass of the monomers in the agglomerate
+where $d_A$ is the projected area diameter, $\zeta$ is the mass-mobility exponent, $d_{100}$ is a reference diameter typically taken as 100 nm, and $\rho_{100}$ is the effective density at $d_{100}$. 
 
-$\frac{d_{A}}{d_{A,1}} = \left( \frac{n_{pp} \rho_m}{{\rho}_{100}} \frac{d_{100}^{{\zeta}-3} (2 r_{pp})^3}{d_{A,1}^{\zeta}} \right) ^ {1 / (\zeta - 3)}$
+To estimate the mobility diameter of an agglomerate, we equate the mass from the mass-mobility relation and that by summing the constituent monomers. From this, we obtain a scaling factor consistent with Nikookar et al. (2025). The scaling factor for the entire aggregate is determined by:
 
-The quantity on the left acts to scale the entire aggregate up to match the given expression. 
+$$\frac{d_{A}}{d_{A,1}} = \left( \frac{n_{pp} \rho_m}{\rho_{100}} \frac{d_{100}^{\zeta-3} (2 r_{pp})^3}{d_{A,1}^{\zeta}} \right) ^ {1 / (\zeta - 3)}.$$
 
-Dispersion can be achieved by sampling $m_{100}$ from a lognormal distribution, centered on an expected geometric mean for $m_{100}$. 
+where $d_{A,1}$ is the estimated projected area diameter in radius units, $n_{pp}$ is the number of primary particles, and $\rho_m$ is the monomer density. 
 
+To account for physical variability, dispersion is achieved by sampling $\rho_{100}$ from a **lognormal distribution**. 
