@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation as R
+from scipy.ndimage import gaussian_filter
 
 from collections import deque
 from IPython.display import display, clear_output  # for live plot in Python
@@ -362,21 +363,7 @@ def Rg(pos):
     return np.sqrt(np.mean(dists_sq))  # root mean square distance
 
 
-# def _ray_trace_engine(pos, radius, view, rays):
-#     """Internal core: Handles rotation and spatial querying."""
-#     # 1. Rotate
-#     v = np.asarray(view) / np.linalg.norm(view)
-#     z_axis = np.array([0, 0, 1])
-#     if not np.allclose(v, z_axis):
-#         rot = R.from_rotvec(np.cross(v, z_axis) * np.arccos(np.dot(v, z_axis)))
-#         pos = rot.apply(pos)
-    
-#     # 2. Query
-#     tree = cKDTree(pos[:, :2])
-#     return tree.query_ball_point(rays, r=radius)
-
-
-def projected_area(pos, radius=1, n_rays=int(1e5), view=None):
+def projected_area(pos, radius=1, view=None, n_rays=int(1e5)):
     """
     Computes the orientation-averaged projected area using 
     stochastic orthographic ray tracing.
@@ -441,76 +428,127 @@ def projected_area(pos, radius=1, n_rays=int(1e5), view=None):
     return area, da
 
 
-def projected_density(pos, radius=1, view=[0,0,1], resolution=512):
-    """
-    Generates a regular grid of rays to produce a projected density image.
+def projected_density(pos, radius=1, view=[0, 0, 1], res=512):
+    # 1. Coordinate Transformation
+    view_vec = np.array(view) / np.linalg.norm(view)
+    target_z = np.array([0, 0, 1])
     
-    Parameters:
-    -----------
-    pos : ndarray (N, 3)
-        X, Y, Z coordinates.
-    radius : float
-        Monomer radius.
-    view : array-like (3,)
-        The direction to look along.
-    resolution : int
-        The number of pixels along the largest dimension of the image.
-    """
-    # 1. Align the aggregate to the view vector (View -> Z-axis)
-    v = np.asarray(view) / np.linalg.norm(view)
-    z_axis = np.array([0, 0, 1])
-    
-    if not np.allclose(v, z_axis):
-        # Handle the case for looking exactly backwards
-        if np.allclose(v, -z_axis):
-            projected_pos = pos * np.array([1, 1, -1])
-        else:
-            rot_axis = np.cross(v, z_axis)
-            rot_axis /= np.linalg.norm(rot_axis)
-            angle = np.arccos(np.clip(np.dot(v, z_axis), -1.0, 1.0))
-            projected_pos = R.from_rotvec(rot_axis * angle).apply(pos)
-    else:
-        projected_pos = pos
+    # Find rotation that aligns view_vec with the Z-axis
+    # If vectors are already aligned, Rotation.align_vectors handles it gracefully
+    rot, _ = R.align_vectors(target_z.reshape(1,3), view_vec.reshape(1,3))
+    pos_p = rot.apply(pos)
 
-    # 2. Extract 2D projection
-    xy = projected_pos[:, :2]
+    # 2. Setup Bounds and Grid
+    min_b = np.min(pos_p[:, :2], axis=0) - radius
+    max_b = np.max(pos_p[:, :2], axis=0) + radius
+    extent = [min_b[0], max_b[0], min_b[1], max_b[1]]
     
-    # 3. Define Bounding Box and Grid
-    x_min, y_min = np.min(xy, axis=0) - radius
-    x_max, y_max = np.max(xy, axis=0) + radius
+    img_count = np.zeros((res, res))
+    img_length = np.zeros((res, res))
     
-    width = x_max - x_min
-    height = y_max - y_min
+    dx_pixel = (max_b[0] - min_b[0]) / res
+    dy_pixel = (max_b[1] - min_b[1]) / res
     
-    # Maintain aspect ratio for square pixels
-    if width > height:
-        nx = resolution
-        ny = int(resolution * (height / width))
-    else:
-        ny = resolution
-        nx = int(resolution * (width / height))
+    r_sq = radius**2
+    
+    # 3. Rasterization Loop
+    for p in pos_p:
+        # Determine the footprint of the particle in pixel indices
+        x_min_idx = int((p[0] - radius - min_b[0]) / dx_pixel)
+        x_max_idx = int((p[0] + radius - min_b[0]) / dx_pixel)
+        y_min_idx = int((p[1] - radius - min_b[1]) / dy_pixel)
+        y_max_idx = int((p[1] + radius - min_b[1]) / dy_pixel)
         
-    # Create the evenly spaced rays
-    x_range = np.linspace(x_min, x_max, nx)
-    y_range = np.linspace(y_min, y_max, ny)
-    grid_x, grid_y = np.meshgrid(x_range, y_range)
-    pixel_centers = np.vstack([grid_x.ravel(), grid_y.ravel()]).T
+        # Clip to image boundaries
+        x_min_idx = max(0, x_min_idx)
+        x_max_idx = min(res - 1, x_max_idx)
+        y_min_idx = max(0, y_min_idx)
+        y_max_idx = min(res - 1, y_max_idx)
+        
+        if x_min_idx > x_max_idx or y_min_idx > y_max_idx:
+            continue
 
-    # 4. Use KDTree to count intersections per ray
-    tree = cKDTree(xy)
-    # query_ball_point finds all spheres within 'radius' of the ray center
-    hits = tree.query_ball_point(pixel_centers, r=radius)
-    
-    # 5. Build the image array
-    # count how many indices were returned for each pixel
-    counts = np.array([len(h) for h in hits])
-    image = counts.reshape((ny, nx))
+        # Create localized coordinates for the pixels in the footprint
+        ix = np.arange(x_min_idx, x_max_idx + 1)
+        iy = np.arange(y_min_idx, y_max_idx + 1)
+        
+        # Calculate physical centers of these pixels
+        grid_x = min_b[0] + (ix + 0.5) * dx_pixel
+        grid_y = min_b[1] + (iy + 0.5) * dy_pixel
+        
+        # Distance squared in the projection plane (Vectorized for this particle)
+        dist_sq = (grid_x[None, :] - p[0])**2 + (grid_y[:, None] - p[1])**2
+        
+        # Identify pixels inside the sphere projection
+        hit_mask = dist_sq <= r_sq
+        
+        if np.any(hit_mask):
+            # Extract the sub-region of the image for updating
+            sub_count = img_count[y_min_idx:y_max_idx+1, x_min_idx:x_max_idx+1]
+            sub_length = img_length[y_min_idx:y_max_idx+1, x_min_idx:x_max_idx+1]
+            
+            sub_count[hit_mask] += 1
+            # Chord length calculation: 2 * sqrt(R^2 - d^2)
+            sub_length[hit_mask] += 2 * np.sqrt(r_sq - dist_sq[hit_mask])
+            
+    return img_length, img_count, extent
 
-    # Format extent.
-    extent = (x_min, x_max, y_min, y_max)
+
+def beer_lambert(density):
+    return 1 - np.exp(-density)
+
+def plot_projection(*args, cmap='grey', type='density', tem_args=None, **kwargs):
+    # Get projection.
+    proj = projected_density(*args, **kwargs)
+
+    # Parse which quantity to plot.
+    if type == 'count':
+        to_plot = proj[1]
+    elif type == 'beer-lambert':
+        to_plot = beer_lambert(proj[0])
+    elif type == 'tem':
+        to_plot = tem_noise(proj[0], **tem_args)[0]
+    else:  # density
+        to_plot = proj[0]
+
+    # Generate plot.
+    plt.imshow(to_plot, extent=proj[2], cmap=cmap)
+    plt.gca().axis('off')
+
+    return to_plot
+
+
+def tem_noise(img_length, mu=1.0, dose=2000, noise_floor=0.15, grain_size=1.0):
+# 1. Beer-Lambert Transmission (The "Mean" Signal)
+    transmission = np.exp(-mu * img_length)
     
-    # Flip the image vertically to match standard coordinate plotting
-    return np.flipud(image), extent
+    # 2. Shot Noise Generation
+    counts = np.random.poisson(transmission * dose).astype(float)
+    noisy_signal = counts / dose
+    
+    # 3. Support Film Generation
+    support_film = np.random.normal(0, noise_floor, img_length.shape)
+    if grain_size > 0:
+        support_film = gaussian_filter(support_film, sigma=grain_size)
+    
+    # 4. Calculate Expected Standard Deviation (Analytical)
+    # Shot noise variance: Var(Poisson(L)/dose) = L/dose
+    var_shot = transmission / dose
+    
+    # Support film variance: The Gaussian filter reduces variance.
+    # The reduction factor for a 2D Gaussian filter is 1 / (4 * pi * sigma^2)
+    if grain_size > 0:
+        reduction_factor = 1.0 / (4 * np.pi * grain_size**2)
+        var_support = (noise_floor**2) * reduction_factor
+    else:
+        var_support = noise_floor**2
+        
+    expected_std = np.sqrt(var_shot + var_support)
+    
+    # Final Image
+    final_img = np.clip(noisy_signal + support_film, 0, None)
+    
+    return final_img, expected_std
 
 
 def scale_agg(pos, radius=1, rho_100=510, zet=2.48, rho_m=1860, rho_gsd=1, da1=None):
