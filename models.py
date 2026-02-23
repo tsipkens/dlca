@@ -132,7 +132,7 @@ def run(n_particles, seed_density, f_xyz=True, f_plot=False):
     if f_xyz:
         tools.write_xyz(pos, RADIUS, c=aggs, filename=f'outputs\\agg_{id}_final.xyz')  # write XYZ coordinates
     
-    print('\n' + tools.get_ascii_2d(pos, left=18))
+    print('\n' + tools.get_ascii_2d(pos, left=18, color=color))
     print('\n' + '-'*66)
 
     return pos, dsu, box_size

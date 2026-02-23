@@ -174,7 +174,7 @@ def update_live_plot(fig, scat, pos, clusters):
     plt.pause(0.001)
 
 
-def get_ascii_2d(pos, box_size=None, res=(10, 25), left=0):
+def get_ascii_2d(pos, box_size=None, res=(10, 25), left=0, color="\033[92m"):
     """
     Returns a 2D ASCII string projection (XY plane).
     res: (rows, cols)
@@ -206,7 +206,7 @@ def get_ascii_2d(pos, box_size=None, res=(10, 25), left=0):
             
     # Join into a multiline string
     out = " "*left + "╭" + "-"*int(res[1]) + "╮\n"
-    out = out + "\033[0m|\n".join([" "*left + "|\033[92m" + "".join(row) for row in grid])
+    out = out + "\033[0m|\n".join([" "*left + "|" + color + "".join(row) for row in grid])
     out = out + "\033[0m|\n" + " "*left + "╰" + "-"*int(res[1]) + "╯"
     return out
 
