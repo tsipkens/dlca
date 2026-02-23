@@ -1,7 +1,10 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+
 from scipy.spatial import cKDTree
+from scipy.spatial.transform import Rotation as R
+
 from collections import deque
 from IPython.display import display, clear_output  # for live plot in Python
 import time
@@ -326,6 +329,7 @@ def backoff(pos, radius, box_size, pairs, aggs):
     return (pos + backoff[aggs]) % box_size  # update positions and apply periodic boundary conditions
 
 
+
 def com(pos, box_size):
     """
     Computes COM for equivalent particles under periodic boundary conditions.
@@ -356,3 +360,76 @@ def Rg(pos):
     """
     dists_sq = np.sum((pos - com(pos))**2, axis=1)  # square distance to CoM
     return np.sqrt(np.mean(dists_sq))  # root mean square distance
+
+
+def projected_area(pos, radius=1, view_vector=[1,0,0], res0=100):
+    """
+    Computes projected area of overlapping spheres along a specific vector.
+    
+    Parameters:
+    -----------
+    pos : ndarray (N, 3)
+        X, Y, Z coordinates of particles.
+    radius : float
+        Radius of the spheres.
+    view_vector : array-like (3,)
+        The direction vector to look along.
+    res0 : float
+        Resolution per particle.
+    """
+
+    resolution = res0 * len(pos)  # increase with number of particles
+
+    # 1. Normalize the view vector
+    v = np.array(view_vector) / np.linalg.norm(view_vector)
+    z_axis = np.array([0, 0, 1])  # define z-direction
+
+    # 2. Create rotation to align view_vector with Z-axis
+    # Uses scipy transformation and rotation matrix. 
+    if not np.allclose(v, z_axis):
+        # Calculate rotation axis (cross product)
+        rot_axis = np.cross(v, z_axis)
+        rot_axis /= np.linalg.norm(rot_axis)
+
+        # Calculate angle (dot product)
+        angle = np.arccos(np.clip(np.dot(v, z_axis), -1.0, 1.0))
+
+        # Apply rotation
+        rot = R.from_rotvec(rot_axis * angle)
+        projected_pos = rot.apply(pos)
+    else:
+        projected_pos = pos
+
+    # 3. Flatten to 2D (ignore new Z)
+    xy = projected_pos[:, :2]
+
+    # 4. Define Grid
+    x_min, y_min = np.min(xy, axis=0) - radius
+    x_max, y_max = np.max(xy, axis=0) + radius
+    
+    # Maintain aspect ratio for the grid
+    w, h = x_max - x_min, y_max - y_min
+    if w > h:
+        nx = resolution
+        ny = int(resolution * (h / w))
+    else:
+        ny = resolution
+        nx = int(resolution * (w / h))
+
+    # 5. Rasterize circles onto boolean grid
+    x_coords = np.linspace(x_min, x_max, nx)
+    y_coords = np.linspace(y_min, y_max, ny)
+    grid_x, grid_y = np.meshgrid(x_coords, y_coords)
+    
+    # Mask starts as all False (empty)
+    occupied = np.zeros_like(grid_x, dtype=bool)
+
+    # For each particle, mark its "shadow" on the grid
+    for i in range(len(xy)):
+        # Optimization: only check pixels in the bounding box of the specific circle
+        dist_sq = (grid_x - xy[i,0])**2 + (grid_y - xy[i,1])**2
+        occupied |= (dist_sq <= radius**2)
+
+    # 6. Sum area
+    pixel_area = (w / (nx - 1)) * (h / (ny - 1))
+    return np.sum(occupied) * pixel_area
