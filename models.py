@@ -46,7 +46,7 @@ def run(n_particles, seed_density, f_xyz=1, f_plot=False, output_folder='outputs
 
     # Print input parameters. 
     print('-'*22 + f' SIMULATION ({id}) ' + '-'*22)
-    print(f'              n_particles={n_particles}     box_size={int(box_size):2.3f}')
+    print(f'                n_particles={n_particles}     box_size={int(box_size)}')
     # print('-'*66)
     print('\n')
 
@@ -133,10 +133,10 @@ def run(n_particles, seed_density, f_xyz=1, f_plot=False, output_folder='outputs
             break
 
     pos = tools.unwrap(pos, box_size, RADIUS)  # center agg in box before final write
-    if f_xyz == 1:
+    if f_xyz >= 1:
         tools.write_xyz(pos, RADIUS, c=aggs, filename=f'{output_folder}\\agg_{id}_final.xyz', comment=f'box_size={box_size}')  # write XYZ coordinates
     
     print('\n' + tools.get_ascii_2d(pos, left=18, color=color))
-    print('\n' + '-'*66)
+    print('\n' + '-'*66 + '\n')
 
     return pos, dsu, box_size
