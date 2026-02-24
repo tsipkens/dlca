@@ -37,5 +37,5 @@ for ii in range(len(n_particles)):
 # %%
 
 # Show a projection of one of the agglomerates. 
-img = tools.plot_projection(pos[-1], type='tem', tem_args={'noise_floor': 0.15})
+img = tools.plot_projection(pos[-1], type='tem', tem_args={'noise_floor': 0.15, 'grain_size': 1.5})
 
