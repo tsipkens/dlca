@@ -6,16 +6,18 @@ import tools
 # %%
 
 pos = []
+dsu = []
 
-n_particles = np.random.randint(20, 31, 5)
+n_particles = np.random.randint(20, 31, 2)
 for ii in range(len(n_particles)):
-    pos_ii, dsu, box_size = models.run(n_particles[ii], seed_density=0.0008, f_xyz=2)
-
-    pos.append(pos_ii)
+    pos_ii, dsu_ii, box_size = models.run(n_particles[ii], seed_density=0.0008, f_xyz=2)
+    pos.append(pos_ii)  # save positions in a list
+    dsu.append(dsu_ii)  # save agg information in a list
 
 
 # %%
 
+# Post-process data. 
 pos_sc = []
 da = []
 dpp = []
@@ -34,5 +36,6 @@ for ii in range(len(n_particles)):
 
 # %%
 
+# Show a projection of one of the agglomerates. 
 img = tools.plot_projection(pos[-1], type='tem', tem_args={'noise_floor': 0.15})
 

@@ -406,7 +406,8 @@ def plot_projection(*args, cmap='grey', type='density', tem_args=None, **kwargs)
     elif type == 'beer-lambert':
         to_plot = beer_lambert(proj[0])
     elif type == 'tem':
-        to_plot = tem_noise(proj[0], **tem_args)[0]
+        img = np.pad(proj[0], pad_width=100, mode='constant', constant_values=0)
+        to_plot = tem_noise(img, **tem_args)[0]
     else:  # density
         to_plot = proj[0]
 

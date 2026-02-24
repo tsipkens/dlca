@@ -22,7 +22,8 @@ class DSU:
         """
         self.parent = np.arange(n)
         self.rank = np.zeros(n, dtype=int)
-        self.agg_count = n  # track number of aggs on merge
+        self.age = np.zeros((n, 2)).astype(int)  # stores the time when node i was connected to its parent
+        self.agg_count = n  # track number of aggs/clusters on merge
 
     def find(self, i):
         """
@@ -40,19 +41,22 @@ class DSU:
             i = next_node
         return root
 
-    def union(self, i, j):
+    def union(self, i, j, step=0):
         """Union by rank: Attaches the smaller tree to the larger tree during merges."""
         root_i = self.find(i)
         root_j = self.find(j)
         
         if root_i != root_j:
-            # Union by Rank logic
+            # Union by rank logic
             if self.rank[root_i] > self.rank[root_j]:
                 self.parent[root_j] = root_i
+                self.age[root_j] = [step, i]
             elif self.rank[root_i] < self.rank[root_j]:
                 self.parent[root_i] = root_j
+                self.age[root_i] = [step, j]
             else:
                 self.parent[root_j] = root_i
+                self.age[root_j] = [step, i]
                 self.rank[root_i] += 1
             
             # Decrement aggregate count whenever a merge actually happens
@@ -211,7 +215,7 @@ def run(n_particles, seed_density, f_xyz=1, f_plot=False, output_folder='outputs
 
             # Merge clusters that have collided. 
             for ii, jj in pairs:
-                dsu.union(ii, jj)
+                dsu.union(ii, jj, step)
             
         # 6. UI Updates
         if step % 20 == 0 or dsu.agg_count == 1:
@@ -234,7 +238,7 @@ def run(n_particles, seed_density, f_xyz=1, f_plot=False, output_folder='outputs
 
     pos = tools.unwrap(pos, box_size, RADIUS)  # center agg in box before final write
     if f_xyz >= 1:
-        tools.write_xyz(pos, RADIUS, c=aggs, filename=f'{output_folder}\\agg_{id}_final.xyz', comment=f'box_size={box_size}')  # write XYZ coordinates
+        tools.write_xyz(pos, RADIUS, c=dsu.age[:,0], filename=f'{output_folder}\\agg_{id}_final.xyz', comment=f'box_size={box_size}')  # write XYZ coordinates
     
     print('\n' + tools.get_ascii_2d(pos, left=18, color=color))
     print('\n' + '-'*66 + '\n')
