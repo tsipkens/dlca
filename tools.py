@@ -185,7 +185,7 @@ def unwrap(pos, box_size, radius, origin=None):
     if origin is None:
         origin = box_size/2  # default is center of the box
 
-    r_threshold = 2.05 * radius  # threshold to be considered connected
+    r_threshold = 2.2 * radius  # threshold to be considered connected
 
     n_particles = len(pos)  # number of particles
     unwrapped_pos = np.copy(pos).astype(float) # initialize unwrapped positions
