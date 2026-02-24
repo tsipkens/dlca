@@ -21,6 +21,6 @@ To estimate the mobility diameter of an agglomerate, we equate the mass from the
 
 $$\frac{d_{A}}{d_{A,1}} = \left( \frac{n_{pp} \rho_m}{\rho_{100}} \frac{d_{100}^{\zeta-3} (2 r_{pp})^3}{d_{A,1}^{\zeta}} \right) ^ {1 / (\zeta - 3)}.$$
 
-where $d_{A,1}$ is the estimated projected area diameter in radius units, $n_{pp}$ is the number of primary particles, and $\rho_m$ is the monomer density. 
+where $d_{A,1}$ is the estimated projected area diameter in radius units, $n_{pp}$ is the number of primary particles, $r_{pp}$ is the monomer radius from the simulation (by default, $r_{pp} = 1$), and $\rho_m$ is the monomer density. 
 
 To account for physical variability, dispersion is achieved by sampling $\rho_{100}$ from a **lognormal distribution**. 
