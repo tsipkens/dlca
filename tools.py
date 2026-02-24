@@ -79,26 +79,6 @@ def read_xyz(filename):
     return pos, radius
 
 
-def init_particles(n, box, r):
-    """
-    Places each particle individually and checks for overlap.
-    """
-    positions = []
-    while len(positions) < n:
-        cand = np.random.uniform(0, box, 3)
-        if len(positions) == 0:
-            positions.append(cand)
-        else:
-            # Check PBC distances
-            diff = np.array(positions) - cand
-            diff -= box * np.round(diff / box) # minimum image convention
-            dists = np.linalg.norm(diff, axis=1)
-            if np.all(dists >= 2 * r):
-                positions.append(cand)
-    return np.array(positions)
-
-
-
 
 # def init_live_plot(pos, c=None, ax=None):
 #     """
@@ -248,28 +228,6 @@ def unwrap(pos, box_size, radius, origin=None):
     unwrapped_pos = unwrapped_pos - np.mean(unwrapped_pos, axis=0) + origin
     
     return unwrapped_pos
-
-
-def backoff(pos, radius, box_size, pairs, aggs):
-    """
-    Back particle off of one another to avoid overlap.
-    """
-    backoff = np.zeros((aggs.max() + 1, 3))
-    for ii, jj in pairs:
-        agg_i = aggs[ii]
-
-        # Compute distance vector.
-        diff = pos[ii] - pos[jj]  # distance between particle centers
-        diff = diff - box_size * np.round(diff / box_size)  # apply periodic boundary conditions
-        dist = np.linalg.norm(diff)
-        unit_vec = diff / dist  # unit vector spanning particle centers
-        
-        # Magnitude of correction and multiply by unit vector.
-        correct = 2 * radius - dist + 1e-10  # extra 1e-10 add small amount of space
-        backoff[agg_i] = correct * unit_vec  # backup along normal vector
-
-    return (pos + backoff[aggs]) % box_size  # update positions and apply periodic boundary conditions
-
 
 
 def com(pos, box_size):

@@ -70,7 +70,47 @@ class DSU:
         return self.parent
 
 
-# ----- Function to run simulation -----
+# ------ Other helper functions ------
+def backoff(pos, radius, box_size, pairs, aggs):
+    """
+    Back particle off of one another to avoid overlap.
+    """
+    backoff = np.zeros((aggs.max() + 1, 3))
+    for ii, jj in pairs:
+        agg_i = aggs[ii]
+
+        # Compute distance vector.
+        diff = pos[ii] - pos[jj]  # distance between particle centers
+        diff = diff - box_size * np.round(diff / box_size)  # apply periodic boundary conditions
+        dist = np.linalg.norm(diff)
+        unit_vec = diff / dist  # unit vector spanning particle centers
+        
+        # Magnitude of correction and multiply by unit vector.
+        correct = 2 * radius - dist + 1e-10  # extra 1e-10 add small amount of space
+        backoff[agg_i] = correct * unit_vec  # backup along normal vector
+
+    return (pos + backoff[aggs]) % box_size  # update positions and apply periodic boundary conditions
+
+def init_particles(n, box, r):
+    """
+    Places each particle individually and checks for overlap.
+    """
+    positions = []
+    while len(positions) < n:
+        cand = np.random.uniform(0, box, 3)
+        if len(positions) == 0:
+            positions.append(cand)
+        else:
+            # Check PBC distances
+            diff = np.array(positions) - cand
+            diff -= box * np.round(diff / box) # minimum image convention
+            dists = np.linalg.norm(diff, axis=1)
+            if np.all(dists >= 2 * r):
+                positions.append(cand)
+    return np.array(positions)
+
+
+# ----- Main function used to run simulation -----
 def run(n_particles, seed_density, f_xyz=1, f_plot=False, output_folder='outputs'):
     """
     Run a single DLCA simulation.
@@ -112,7 +152,7 @@ def run(n_particles, seed_density, f_xyz=1, f_plot=False, output_folder='outputs
 
     # --------------- INITIALIZE SIMULATION ---------------
     # Initialize positions randomly
-    pos = tools.init_particles(n_particles, box_size, RADIUS)
+    pos = init_particles(n_particles, box_size, RADIUS)
     n_particles = len(pos)  # update n_particles in case the generator couldn't fit them all
 
     # Initialize DSU, used to track clustering/aggs. 
@@ -167,7 +207,7 @@ def run(n_particles, seed_density, f_xyz=1, f_plot=False, output_folder='outputs
         if pairs:
             # Backoff particles to avoid overlap. 
             # Also avoid pairs continually appearing in later steps. 
-            pos = tools.backoff(pos, RADIUS, box_size, pairs, aggs)
+            pos = backoff(pos, RADIUS, box_size, pairs, aggs)
 
             # Merge clusters that have collided. 
             for ii, jj in pairs:
