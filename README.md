@@ -1,11 +1,11 @@
 # DLCA
 
-Agglomerate Simulation Framework
+This repository contains relatively simple Python code to simulate diffusion-limited cluster aggregation (DLCA). 
 
 Simulations are performed in radius units, where **1 length unit = 1 monomer radius**. Translation to a meaningful scale is described below. 
 
 
-### Mass-Mobility Relations
+### Scaling to mass-mobility relations
 
 We define the mass-mobility relation using the following expressions:
 
