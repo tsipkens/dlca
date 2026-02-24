@@ -2,7 +2,13 @@
 
 This repository contains relatively simple Python code to simulate diffusion-limited cluster aggregation (DLCA). 
 
-Simulations are performed in radius units, where **1 length unit = 1 monomer radius**. Translation to a meaningful scale is described below. 
+Some complexity is added via a discrete set union (DSU) class. This class controls information surrounding clusters/agglomerates, making union of and referencing to cluster information far more efficient. A traditional array containing the cluster identifier for each monomer is accessible via the dsu.flatten() method. 
+
+Otherwise, the models module is relatively straightforward, generating a series on monomers in a box before looping forward in time, randomly moving each aggregate in each timestep and then checking for collisions. 
+
+The code otherwise uses fairly standard packages: numpy, scipy, matplotlib, and tqdm (for progress bars). 
+
+Simulations are performed in radius units, where **1 length unit = 1 monomer radius**. Translation to a meaningful scale is described below. Size is otherwise unimportant, only influencing how far a cluster/agglomerate can move in a given timestep relative to other clusters (for monomers, they all move the same amount). A simplification is made to slow down the agglomerates/clusters as they get larger. 
 
 
 ### Scaling to mass-mobility relations

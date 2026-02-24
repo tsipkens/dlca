@@ -7,68 +7,9 @@ from scipy.spatial.transform import Rotation as R
 from scipy.ndimage import gaussian_filter
 
 from collections import deque
-from IPython.display import display, clear_output  # for live plot in Python
+
+# from IPython.display import display, clear_output  # for live plot in Python
 import time
-
-from tqdm import tqdm
-
-
-# ----- Discrete Set Union (DSU) Helper Class -----
-# Used to make cluster operations more efficient. 
-class DSU:
-    def __init__(self, n):
-        """
-        Initializes Disjoint Set Union with 'n' individual elements.
-        """
-        self.parent = np.arange(n)
-        self.rank = np.zeros(n, dtype=int)
-        self.agg_count = n  # track number of aggs on merge
-
-    def find(self, i):
-        """
-        Iterative find with path compression to prevent RecursionError.
-        Recursively traces up trees to the root particle.
-        """
-        root = i
-        while self.parent[root] != root:
-            root = self.parent[root]
-        
-        # Path compression: Short-circuit the path to the root
-        while self.parent[i] != root:
-            next_node = self.parent[i]
-            self.parent[i] = root
-            i = next_node
-        return root
-
-    def union(self, i, j):
-        """Union by rank: Attaches the smaller tree to the larger tree during merges."""
-        root_i = self.find(i)
-        root_j = self.find(j)
-        
-        if root_i != root_j:
-            # Union by Rank logic
-            if self.rank[root_i] > self.rank[root_j]:
-                self.parent[root_j] = root_i
-            elif self.rank[root_i] < self.rank[root_j]:
-                self.parent[root_i] = root_j
-            else:
-                self.parent[root_j] = root_i
-                self.rank[root_i] += 1
-            
-            # Decrement aggregate count whenever a merge actually happens
-            self.agg_count -= 1
-            return True
-        return False
-
-    def flatten(self):
-        """
-        Ensures all nodes point directly to their root. 
-        Useful for syncing a 'aggs' array in one pass.
-        """
-        for i in range(len(self.parent)):
-            self.find(i)
-        return self.parent
-
 
 
 def pos2xyz(pos):
@@ -159,40 +100,40 @@ def init_particles(n, box, r):
 
 
 
-def init_live_plot(pos, c=None, ax=None):
-    """
-    For plotting a live 3D scatter plot of particle positions. 
-    """
-    if ax is None:
-        ax = plt.gca()
+# def init_live_plot(pos, c=None, ax=None):
+#     """
+#     For plotting a live 3D scatter plot of particle positions. 
+#     """
+#     if ax is None:
+#         ax = plt.gca()
 
-    if c is None:
-        c = np.ones(len(pos))
+#     if c is None:
+#         c = np.ones(len(pos))
 
-    limit = np.max(pos)
-    limit_min = np.min(pos)
-    data_range = limit - limit_min
+#     limit = np.max(pos)
+#     limit_min = np.min(pos)
+#     data_range = limit - limit_min
 
-    # It is crucial to set the limits before calculating the scale
-    ax.set_xlim(limit_min, limit)
-    ax.set_ylim(limit_min, limit)
-    ax.set_zlim(limit_min, limit)
+#     # It is crucial to set the limits before calculating the scale
+#     ax.set_xlim(limit_min, limit)
+#     ax.set_ylim(limit_min, limit)
+#     ax.set_zlim(limit_min, limit)
 
-    x = pos[:,0]
-    y = pos[:,1]
-    z = pos[:,2]
+#     x = pos[:,0]
+#     y = pos[:,1]
+#     z = pos[:,2]
 
-    scat = ax.scatter(x, y, z, s=60, c=c)
+#     scat = ax.scatter(x, y, z, s=60, c=c)
 
-    return scat
+#     return scat
 
-def update_live_plot(fig, scat, pos, clusters):
-    """Update the live plot."""
-    scat._offsets3d = (pos[:,0], pos[:,1], pos[:,2])
-    scat.set_array(clusters)
-    clear_output(wait=True)
-    display(fig)
-    plt.pause(0.001)
+# def update_live_plot(fig, scat, pos, clusters):
+#     """Update the live plot."""
+#     scat._offsets3d = (pos[:,0], pos[:,1], pos[:,2])
+#     scat.set_array(clusters)
+#     clear_output(wait=True)
+#     display(fig)
+#     plt.pause(0.001)
 
 
 def get_ascii_2d(pos, box_size=None, res=(10, 25), left=0, color="\033[92m"):

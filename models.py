@@ -1,7 +1,9 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+
 from scipy.spatial import cKDTree
+
 from tqdm import tqdm
 
 import tools
@@ -9,6 +11,63 @@ import tools
 # DLCA parameters
 RADIUS = 1  # use standard radius of 1
 DIFFUSION_DT = ((0.1*2)**2/2) * RADIUS ** 2  # diffusion coefficient * time step, particle moves ~ 0.1 * DIAM
+
+
+# ----- Discrete Set Union (DSU) Helper Class -----
+# Used to make cluster operations more efficient. 
+class DSU:
+    def __init__(self, n):
+        """
+        Initializes Disjoint Set Union with 'n' individual elements.
+        """
+        self.parent = np.arange(n)
+        self.rank = np.zeros(n, dtype=int)
+        self.agg_count = n  # track number of aggs on merge
+
+    def find(self, i):
+        """
+        Iterative find with path compression to prevent RecursionError.
+        Recursively traces up trees to the root particle.
+        """
+        root = i
+        while self.parent[root] != root:
+            root = self.parent[root]
+        
+        # Path compression: Short-circuit the path to the root
+        while self.parent[i] != root:
+            next_node = self.parent[i]
+            self.parent[i] = root
+            i = next_node
+        return root
+
+    def union(self, i, j):
+        """Union by rank: Attaches the smaller tree to the larger tree during merges."""
+        root_i = self.find(i)
+        root_j = self.find(j)
+        
+        if root_i != root_j:
+            # Union by Rank logic
+            if self.rank[root_i] > self.rank[root_j]:
+                self.parent[root_j] = root_i
+            elif self.rank[root_i] < self.rank[root_j]:
+                self.parent[root_i] = root_j
+            else:
+                self.parent[root_j] = root_i
+                self.rank[root_i] += 1
+            
+            # Decrement aggregate count whenever a merge actually happens
+            self.agg_count -= 1
+            return True
+        return False
+
+    def flatten(self):
+        """
+        Ensures all nodes point directly to their root. 
+        Useful for syncing a 'aggs' array in one pass.
+        """
+        for i in range(len(self.parent)):
+            self.find(i)
+        return self.parent
 
 
 # ----- Function to run simulation -----
@@ -33,7 +92,7 @@ def run(n_particles, seed_density, f_xyz=1, f_plot=False, output_folder='outputs
     --------
     pos : ndarray
         The final (N, 3) array of particle positions.
-    dsu : tools.DSU
+    dsu : DSU
         The Disjoint Set Union object containing the final cluster structure.
     box_size : float
         The side length of the cubic simulation volume.
@@ -58,7 +117,7 @@ def run(n_particles, seed_density, f_xyz=1, f_plot=False, output_folder='outputs
 
     # Initialize DSU, used to track clustering/aggs. 
     # Initially each particle is its own agg. 
-    dsu = tools.DSU(n_particles)  # set up DSU to handle agg operation
+    dsu = DSU(n_particles)  # set up DSU to handle agg operation
     aggs = dsu.flatten()  # extract cluster IDs from dsu
 
     # Write to XYZ.
@@ -98,7 +157,8 @@ def run(n_particles, seed_density, f_xyz=1, f_plot=False, output_folder='outputs
         lookup[unique_aggs] = displace
         pos = (pos + lookup[aggs]) % box_size  # update positions and apply periodic boundary conditions
 
-        # 4. Build a KDTree for computing distances efficiently.
+        # 4. Build a KDTree for computing pairwise distances efficiently.
+        # As per below, if particles are far apart, their distance is not queried as a pair. 
         tree = cKDTree(pos, boxsize=box_size)
 
         # 5. Consider pairs, backoff to prevent overlap, and then merge. 
